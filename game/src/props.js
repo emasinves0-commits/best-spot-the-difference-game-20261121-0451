@@ -1,35 +1,8 @@
 // Code-drawn props. Each drawer paints one object from a plain parameter bag,
 // so a "difference" is just the same bag with one value changed.
 import { hash01 } from './rng.js';
-
-const TAU = Math.PI * 2;
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function glowOn(ctx, color, blur) {
-  ctx.shadowColor = color;
-  ctx.shadowBlur = blur;
-}
-
-function glowOff(ctx) {
-  ctx.shadowBlur = 0;
-  ctx.shadowColor = 'transparent';
-}
-
-function disc(ctx, x, y, r, fill) {
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, TAU);
-  ctx.fill();
-}
+import { TAU, roundRect, glowOn, glowOff, disc } from './paint.js';
+import { ROOF_DRAWERS } from './props_roof.js';
 
 // ---------------------------------------------------------------- buildings
 
@@ -103,8 +76,10 @@ function building(ctx, p) {
   }
 
   // ground floor: door plus optional awning
-  ctx.fillStyle = '#0f0c26';
-  ctx.fillRect(p.x + p.w / 2 - 9, p.y - 34, 18, 34);
+  if (!p.nodoor) {
+    ctx.fillStyle = '#0f0c26';
+    ctx.fillRect(p.x + p.w / 2 - 9, p.y - 34, 18, 34);
+  }
   if (p.awning) {
     const aw = Math.min(p.w - 16, 70);
     const ax = p.x + (p.w - aw) / 2;
@@ -780,7 +755,7 @@ function piling(ctx, p) {
 
 const DRAWERS = {
   building, sign, palm, orb, cloud, bird, star, gator, crab, flamingo, car, lamp, hydrant,
-  bench, crate, flag, umbrella, boat, buoy, lighthouse, ball, ferris, stall, piling,
+  bench, crate, flag, umbrella, boat, buoy, lighthouse, ball, ferris, stall, piling, ...ROOF_DRAWERS,
 };
 
 export function drawProp(ctx, p) {
