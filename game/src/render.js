@@ -5,7 +5,7 @@
 import { LEVELS } from './levels.js';
 import { SCENE_W, SCENE_H } from './scene.js';
 import {
-  HINTS_PER_LEVEL, HINT_SECONDS, currentLevel, differencesLeft, timeLeft, totalScore, totalTime,
+  HINTS_PER_LEVEL, HINT_SECONDS, comboMultiplier, currentLevel, differencesLeft, timeLeft, totalScore, totalTime,
 } from './game.js';
 import { isMuted } from './audio.js';
 
@@ -19,6 +19,7 @@ const CYAN = '#4fe3ff';
 const PINK = '#ff4fa3';
 const GOLD = '#ffd23f';
 const GREEN = '#3dff9c';
+const LEVEL_COLORS = [CYAN, PINK, GREEN, GOLD];
 
 // Map a canvas point onto a picture: which side, and the picture coordinates.
 export function panelAt(x, y) {
@@ -91,6 +92,53 @@ function drawStars(ctx, cx, cy, size, count, total = 3) {
   }
 }
 
+// A small flame, drawn from two bezier teardrops; flickers with the clock.
+function drawFlame(ctx, cx, base, size, clock, lit) {
+  const flick = lit ? Math.sin(clock * 14) * 0.06 : 0;
+  const layers = [[size, lit ? '#ff7a1a' : '#4a4468'], [size * 0.62, lit ? '#ffd23f' : '#5d577f'], [size * 0.3, lit ? '#fff6c8' : '#6d6790']];
+  for (const [h, color] of layers) {
+    const w = h * 0.62;
+    ctx.beginPath();
+    ctx.moveTo(cx, base);
+    ctx.bezierCurveTo(cx - w, base - h * 0.2, cx - w * 0.7, base - h * 0.62, cx + flick * h, base - h);
+    ctx.bezierCurveTo(cx + w * 0.7, base - h * 0.62, cx + w, base - h * 0.2, cx, base);
+    ctx.fillStyle = color;
+    if (lit) {
+      ctx.shadowColor = '#ff7a1a';
+      ctx.shadowBlur = h === size ? 16 : 0;
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawCombo(ctx, g) {
+  const mult = comboMultiplier(g.streak);
+  const lit = mult > 1;
+  const x = 1000;
+  pill(ctx, x, 20, 128, 66, 16);
+  ctx.fillStyle = lit ? 'rgba(255,122,26,0.18)' : 'rgba(255,255,255,0.05)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = lit ? '#ff9a3a' : 'rgba(255,255,255,0.25)';
+  if (lit) {
+    ctx.shadowColor = '#ff7a1a';
+    ctx.shadowBlur = 14;
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  drawFlame(ctx, x + 26, 70, lit ? 40 + mult * 3 : 34, g.clock, lit);
+  text(ctx, 'COMBO', x + 114, 40, 13, lit ? '#ffb36b' : '#8f88b8', 'right', 'bold');
+  text(ctx, 'x' + mult, x + 114, 74, 36, lit ? '#ffd23f' : '#8f88b8', 'right', 'bold', lit ? 12 : 0);
+  // streak pips: 4 in a row reaches the top multiplier
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.arc(x + 58 + i * 11, 80, 3, 0, Math.PI * 2);
+    ctx.fillStyle = i < Math.min(4, g.streak) ? '#ffa24a' : 'rgba(255,255,255,0.18)';
+    ctx.fill();
+  }
+}
+
 function drawButton(ctx, b, mouse) {
   const hot = mouse && mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h;
   const color = b.color || CYAN;
@@ -151,6 +199,41 @@ function ring(ctx, x, y, r, color, width, blur) {
   ctx.shadowBlur = 0;
 }
 
+// The hint: a gold glow that breathes, two ripples that spread outward, and a
+// ring that shrinks as the 2 seconds run out. Fades in and out at the edges.
+function drawHint(ctx, g, level) {
+  const d = level.diffs.find((e) => e.id === g.hint.id);
+  if (!d) return;
+  const age = g.hint.age;
+  const fadeIn = Math.min(1, age / 0.15);
+  const fadeOut = age > HINT_SECONDS - 0.3 ? (HINT_SECONDS - age) / 0.3 : 1;
+  const alpha = Math.max(0, Math.min(fadeIn, fadeOut));
+  const beat = 0.5 + 0.5 * Math.sin(age * 10);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const glow = ctx.createRadialGradient(d.x, d.y, 2, d.x, d.y, d.radius + 26);
+  glow.addColorStop(0, `rgba(255,210,63,${0.1 + beat * 0.3})`);
+  glow.addColorStop(1, 'rgba(255,210,63,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, d.radius + 26, 0, Math.PI * 2);
+  ctx.fill();
+  ring(ctx, d.x, d.y, d.radius + 4 + beat * 6, GOLD, 5, 22);
+  for (let i = 0; i < 2; i++) {
+    const t = (age * 1.4 + i * 0.5) % 1;
+    ctx.globalAlpha = alpha * (1 - t);
+    ring(ctx, d.x, d.y, d.radius + 6 + t * 36, GOLD, 3, 10);
+  }
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#fff6c8';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, d.radius + 17, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - age / HINT_SECONDS));
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPanel(ctx, g, bitmap, rect, side, accent, ui) {
   const shakeAmount = g.shake.side === side && g.shake.age < 0.4 ? Math.sin(g.shake.age * 70) * 7 * (1 - g.shake.age / 0.4) : 0;
   ctx.save();
@@ -179,17 +262,7 @@ function drawPanel(ctx, g, bitmap, rect, side, accent, ui) {
       ctx.globalAlpha = 1;
     }
   }
-  if (g.hint) {
-    const d = level.diffs.find((e) => e.id === g.hint.id);
-    if (d) {
-      const fade = g.hint.age > HINT_SECONDS - 0.4 ? (HINT_SECONDS - g.hint.age) / 0.4 : 1;
-      ctx.globalAlpha = Math.max(0, fade);
-      const pulse = Math.sin(g.hint.age * 9);
-      ring(ctx, d.x, d.y, d.radius + 6 + pulse * 5, GOLD, 5, 22);
-      ring(ctx, d.x, d.y, d.radius + 18 + pulse * 5, 'rgba(255,210,63,0.5)', 2.5, 10);
-      ctx.globalAlpha = 1;
-    }
-  }
+  if (g.hint) drawHint(ctx, g, level);
   for (const f of g.flashes) {
     if (f.side !== side) continue;
     ctx.globalAlpha = 1 - f.age / 0.6;
@@ -265,6 +338,7 @@ function drawHud(ctx, g, ui, buttons) {
     ctx.stroke();
   }
 
+  drawCombo(ctx, g);
   text(ctx, 'SCORE', 1250, 34, 14, '#d9ccff', 'right', 'bold');
   text(ctx, String(totalScore(g)), 1250, 74, 40, GOLD, 'right', 'bold', 12);
 
@@ -310,7 +384,7 @@ function drawHud(ctx, g, ui, buttons) {
   buttons.push({ id: 'restart', x: 376, y, w: 280, h: 56, label: 'RESTART  [R]', color: CYAN });
   buttons.push({ id: 'menu', x: 672, y, w: 280, h: 56, label: 'MENU  [Esc]', color: PINK });
   buttons.push({ id: 'mute', x: 968, y, w: 282, h: 56, label: isMuted() ? 'SOUND OFF  [M]' : 'SOUND ON  [M]', color: GREEN });
-  text(ctx, 'Click a difference on either picture   ·   wrong clicks cost 25 points   ·   keys 1 2 3 jump to a level', 640, 780, 15, '#a99ad6', 'center', 'normal');
+  text(ctx, 'Click a difference on either picture   ·   wrong clicks cost 25 points and break your combo   ·   keys 1-4 jump to a level', 640, 780, 15, '#a99ad6', 'center', 'normal');
 }
 
 // ---------------------------------------------------------------- screens
@@ -342,7 +416,7 @@ function drawClear(ctx, g, buttons) {
   drawStars(ctx, 640, 340, 84, r.stars);
   text(ctx, `Score  +${r.score}`, 640, 428, 34, GOLD, 'center', 'bold', 10);
   text(ctx, `Time  ${formatTime(r.time)}${g.newBest ? '   NEW BEST!' : ''}`, 640, 468, 24, g.newBest ? GREEN : '#fff', 'center');
-  text(ctx, `Total score  ${totalScore(g)}`, 640, 502, 20, '#d9ccff', 'center', 'normal');
+  text(ctx, `Total score  ${totalScore(g)}   ·   longest streak ${r.maxStreak}${g.newBestScore ? '   ·   NEW BEST SCORE!' : ''}`, 640, 502, 18, '#d9ccff', 'center', 'normal');
   buttons.push({ id: 'next', x: 380, y: 530, w: 520, h: 56, label: 'NEXT LEVEL  ▶', color: GREEN, size: 24 });
   buttons.push({ id: 'restart', x: 380, y: 596, w: 250, h: 40, label: 'Replay  [R]', color: CYAN, size: 17 });
   buttons.push({ id: 'menu', x: 650, y: 596, w: 250, h: 40, label: 'Menu  [Esc]', color: PINK, size: 17 });
@@ -362,48 +436,61 @@ function drawTimeUp(ctx, g, buttons) {
 
 function drawVictory(ctx, g, buttons) {
   dim(ctx);
-  card(ctx, 300, 90, 680, 620, GOLD);
-  text(ctx, 'YOU SPOTTED THEM ALL!', 640, 168, 44, GOLD, 'center', 'bold', 20);
-  text(ctx, 'Neon Palms is yours: three scenes, 29 differences.', 640, 202, 19, '#d9ccff', 'center', 'normal');
+  card(ctx, 300, 64, 680, 680, GOLD);
+  const total = LEVELS.reduce((n, lv) => n + lv.diffs.length, 0);
+  text(ctx, 'YOU SPOTTED THEM ALL!', 640, 140, 44, GOLD, 'center', 'bold', 20);
+  text(ctx, `Neon Palms is yours: ${LEVELS.length} scenes, ${total} differences.`, 640, 174, 19, '#d9ccff', 'center', 'normal');
   LEVELS.forEach((lv, i) => {
-    const y = 254 + i * 74;
+    const y = 206 + i * 62;
     const r = g.results[i];
-    text(ctx, `${lv.id}. ${lv.name}`, 350, y + 14, 24, '#fff', 'left');
+    text(ctx, `${lv.id}. ${lv.name}`, 340, y + 30, 23, '#fff', 'left');
     if (r) {
-      text(ctx, `${formatTime(r.time)}   ${r.score} pts`, 700, y + 12, 19, '#d9ccff', 'left', 'normal');
-      drawStars(ctx, 900, y + 6, 36, r.stars);
+      text(ctx, `${formatTime(r.time)}   ${r.score} pts`, 640, y + 29, 18, '#d9ccff', 'left', 'normal');
+      drawStars(ctx, 890, y + 24, 32, r.stars);
     }
   });
-  text(ctx, `Total score  ${totalScore(g)}`, 640, 500, 44, GOLD, 'center', 'bold', 16);
-  text(ctx, `Total time  ${formatTime(totalTime(g))}`, 640, 546, 28, CYAN, 'center', 'bold', 10);
-  buttons.push({ id: 'again', x: 400, y: 586, w: 480, h: 58, label: 'PLAY AGAIN', color: GREEN, size: 26 });
-  buttons.push({ id: 'menu', x: 400, y: 654, w: 480, h: 38, label: 'Menu  [Esc]', color: PINK, size: 17 });
+  const streak = Math.max(0, ...g.results.map((r) => (r ? r.maxStreak : 0)));
+  text(ctx, `Total score  ${totalScore(g)}`, 640, 518, 44, GOLD, 'center', 'bold', 16);
+  text(ctx, `Total time  ${formatTime(totalTime(g))}   ·   longest streak ${streak}`, 640, 562, 24, CYAN, 'center', 'bold', 10);
+  buttons.push({ id: 'again', x: 400, y: 596, w: 480, h: 58, label: 'PLAY AGAIN', color: GREEN, size: 26 });
+  buttons.push({ id: 'menu', x: 400, y: 664, w: 480, h: 38, label: 'Menu  [Esc]', color: PINK, size: 17 });
 }
 
 function drawMenu(ctx, g, bitmaps, ui, buttons) {
   text(ctx, 'NEON PALMS', 640, 118, 92, PINK, 'center', 'bold', 34);
   text(ctx, 'S P O T   T H E   D I F F E R E N C E', 640, 168, 28, CYAN, 'center', 'bold', 14);
   text(ctx, 'Two pictures. A handful of sneaky changes. Find them before the clock runs dry.', 640, 206, 19, '#d9ccff', 'center', 'normal');
+  const cw = 296;
+  const gap = 14;
+  const x0 = (CANVAS_W - (LEVELS.length * cw + (LEVELS.length - 1) * gap)) / 2;
   LEVELS.forEach((lv, i) => {
-    const x = 40 + i * 410;
-    const y = 232;
-    const b = { id: 'card' + i, x, y, w: 380, h: 388, label: '' };
+    const x = x0 + i * (cw + gap);
+    const y = 228;
+    const b = { id: 'card' + i, x, y, w: cw, h: 392, label: '' };
     const hot = ui.mouse && ui.mouse.x >= b.x && ui.mouse.x <= b.x + b.w && ui.mouse.y >= b.y && ui.mouse.y <= b.y + b.h;
-    card(ctx, x, y, 380, 388, hot ? GOLD : [CYAN, PINK, GREEN][i]);
+    const accent = LEVEL_COLORS[i % LEVEL_COLORS.length];
+    card(ctx, x, y, cw, 392, hot ? '#ffffff' : accent);
     ctx.save();
-    pill(ctx, x + 14, y + 14, 352, 264, 12);
+    pill(ctx, x + 14, y + 14, cw - 28, 201, 12);
     ctx.clip();
-    ctx.drawImage(bitmaps[i].right, x + 14, y + 14, 352, 264);
+    ctx.drawImage(bitmaps[i].right, x + 14, y + 14, cw - 28, 201);
     ctx.restore();
-    text(ctx, `LEVEL ${lv.id}`, x + 20, y + 312, 15, [CYAN, PINK, GREEN][i], 'left', 'bold');
-    text(ctx, lv.name, x + 20, y + 342, 28, '#fff', 'left');
-    text(ctx, `${lv.diffs.length} differences · ${lv.timeLimit}s`, x + 20, y + 370, 16, '#d9ccff', 'left', 'normal');
+    text(ctx, `LEVEL ${lv.id}`, x + 20, y + 244, 14, accent, 'left', 'bold');
+    text(ctx, lv.name, x + 20, y + 274, 25, '#fff', 'left');
+    text(ctx, `${lv.diffs.length} differences · ${lv.timeLimit}s`, x + 20, y + 300, 15, '#d9ccff', 'left', 'normal');
     const best = g.bestTimes[lv.id];
-    text(ctx, best === undefined ? 'Best  --' : `Best  ${formatTime(best)}`, x + 360, y + 370, 16, GOLD, 'right', 'bold');
+    const score = g.bestScores[lv.id];
+    pill(ctx, x + 14, y + 316, cw - 28, 62, 12);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fill();
+    text(ctx, 'BEST SCORE', x + 26, y + 338, 11, '#a99ad6', 'left', 'bold');
+    text(ctx, score === undefined ? '--' : String(score), x + 26, y + 366, 26, GOLD, 'left', 'bold', score === undefined ? 0 : 8);
+    text(ctx, 'BEST TIME', x + cw - 26, y + 338, 11, '#a99ad6', 'right', 'bold');
+    text(ctx, best === undefined ? '--' : formatTime(best), x + cw - 26, y + 366, 26, '#fff', 'right', 'bold');
     buttons.push(b);
   });
-  text(ctx, 'Click a level or press 1 / 2 / 3', 640, 668, 22, '#fff', 'center', 'bold', 6);
-  text(ctx, 'H hint  ·  R restart  ·  Esc menu  ·  M mute  ·  3 hints per level, each costs 50 points', 640, 704, 16, '#a99ad6', 'center', 'normal');
+  text(ctx, 'Click a level or press 1 - 4', 640, 668, 22, '#fff', 'center', 'bold', 6);
+  text(ctx, 'H hint  ·  R restart  ·  Esc menu  ·  M mute  ·  3 hints per level (50 points each)  ·  streaks build a x2 / x3 combo', 640, 704, 16, '#a99ad6', 'center', 'normal');
   buttons.push({ id: 'mute', x: 500, y: 726, w: 280, h: 46, label: isMuted() ? 'SOUND OFF  [M]' : 'SOUND ON  [M]', color: GREEN, size: 17 });
 }
 
