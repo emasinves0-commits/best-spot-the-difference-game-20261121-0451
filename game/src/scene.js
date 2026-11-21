@@ -145,7 +145,58 @@ function paintMarina(ctx, level) {
   }
 }
 
-const GROUND = { road: paintRoad, boardwalk: paintBoardwalk, marina: paintMarina };
+// A parapet wall along the far edge of a roof, then a warm tiled deck.
+function paintRooftop(ctx, level) {
+  const y0 = level.horizon;
+  const wall = ctx.createLinearGradient(0, y0, 0, y0 + 36);
+  wall.addColorStop(0, '#3a2a68');
+  wall.addColorStop(1, '#241848');
+  ctx.fillStyle = wall;
+  ctx.fillRect(0, y0, SCENE_W, 36);
+  ctx.strokeStyle = 'rgba(12,6,30,0.5)';
+  ctx.lineWidth = 1.5;
+  for (let x = 0; x < SCENE_W; x += 30) {
+    ctx.beginPath();
+    ctx.moveTo(x, y0 + 4);
+    ctx.lineTo(x, y0 + 34);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#6a58a8';
+  ctx.fillRect(0, y0 + 32, SCENE_W, 5);
+  ctx.save();
+  ctx.shadowColor = '#4fe3ff';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#4fe3ff';
+  ctx.fillRect(0, y0 - 1, SCENE_W, 3);
+  ctx.restore();
+  const deck = ctx.createLinearGradient(0, y0 + 37, 0, SCENE_H);
+  deck.addColorStop(0, '#5b3f7e');
+  deck.addColorStop(1, '#2a1a46');
+  ctx.fillStyle = deck;
+  ctx.fillRect(0, y0 + 37, SCENE_W, SCENE_H - y0 - 37);
+  const glow = ctx.createLinearGradient(0, y0 + 37, 0, SCENE_H);
+  glow.addColorStop(0, 'rgba(255,140,90,0.28)');
+  glow.addColorStop(1, 'rgba(255,140,90,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, y0 + 37, SCENE_W, SCENE_H - y0 - 37);
+  // deck tiles converging on the sunrise
+  ctx.strokeStyle = 'rgba(15,6,32,0.5)';
+  ctx.lineWidth = 1.5;
+  for (let y = y0 + 52; y < SCENE_H; y += 14 + (y - y0) * 0.1) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(SCENE_W, y);
+    ctx.stroke();
+  }
+  for (let i = -8; i <= 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(300 + i * 24, y0 + 37);
+    ctx.lineTo(300 + i * 110, SCENE_H);
+    ctx.stroke();
+  }
+}
+
+const GROUND = { road: paintRoad, boardwalk: paintBoardwalk, marina: paintMarina, rooftop: paintRooftop };
 
 export function drawScene(ctx, level, altered) {
   const diffs = altered ? level.diffs : [];
