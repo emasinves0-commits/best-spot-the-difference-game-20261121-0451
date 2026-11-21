@@ -3,14 +3,21 @@
 // happened through game.events so the caller can play sounds.
 import { LEVELS } from './levels.js';
 
-export const HINT_SECONDS = 2.5;
+export const HINT_SECONDS = 2;
 export const HINTS_PER_LEVEL = 3;
 export const FOUND_POINTS = 100;
 export const TIME_BONUS_MAX = 50;
 export const WRONG_PENALTY = 25;
 export const HINT_COST = 50;
 
-export function createGame(bestTimes = {}) {
+// Combo: finds in a row without a wrong click. 2 in a row earns x2, 4 in a row x3.
+export function comboMultiplier(streak) {
+  if (streak >= 4) return 3;
+  if (streak >= 2) return 2;
+  return 1;
+}
+
+export function createGame(bestTimes = {}, bestScores = {}) {
   return {
     mode: 'menu', // menu | playing | clear | timeup | victory
     levelIndex: 0,
@@ -23,9 +30,13 @@ export function createGame(bestTimes = {}) {
     flashes: [], // wrong-click crosses
     popups: [], // floating score text
     shake: { side: 'left', age: 99 },
-    results: [], // one per cleared level: {score, time, stars}
+    results: [], // one per cleared level: {score, time, stars, maxStreak}
     bestTimes,
+    bestScores, // best level score per level id
     newBest: false,
+    newBestScore: false,
+    streak: 0, // correct finds in a row
+    maxStreak: 0,
     events: [],
     clock: 0,
   };
@@ -68,6 +79,9 @@ export function startLevel(g, index) {
   g.flashes = [];
   g.popups = [];
   g.newBest = false;
+  g.newBestScore = false;
+  g.streak = 0;
+  g.maxStreak = 0;
   if (g.levelIndex === 0) {
     g.carried = 0;
     g.results = [];
@@ -101,10 +115,13 @@ export function playAgain(g) {
 function finishLevel(g) {
   const level = currentLevel(g);
   const stars = starsFor(level, g.elapsed);
-  g.results[g.levelIndex] = { score: g.levelScore, time: g.elapsed, stars };
+  g.results[g.levelIndex] = { score: g.levelScore, time: g.elapsed, stars, maxStreak: g.maxStreak };
   const prev = g.bestTimes[level.id];
   g.newBest = prev === undefined || g.elapsed < prev;
   if (g.newBest) g.bestTimes[level.id] = g.elapsed;
+  const prevScore = g.bestScores[level.id];
+  g.newBestScore = prevScore === undefined || g.levelScore > prevScore;
+  if (g.newBestScore) g.bestScores[level.id] = g.levelScore;
   g.carried += g.levelScore;
   g.levelScore = 0;
   g.hint = null;
@@ -146,15 +163,19 @@ export function clickPicture(g, x, y, side) {
     if (g.found.some((f) => f.id === d.id)) return 'again';
     g.found.push({ id: d.id, x: d.x, y: d.y, radius: d.radius, age: 0 });
     const bonus = Math.round((TIME_BONUS_MAX * timeLeft(g)) / level.timeLimit);
-    const points = FOUND_POINTS + bonus;
+    const mult = comboMultiplier(g.streak);
+    const points = (FOUND_POINTS + bonus) * mult;
     g.levelScore += points;
-    g.popups.push({ x: d.x, y: d.y - d.radius - 6, text: '+' + points, age: 0, color: '#6dffb2', side: 'both' });
+    g.streak += 1;
+    g.maxStreak = Math.max(g.maxStreak, g.streak);
+    g.popups.push({ x: d.x, y: d.y - d.radius - 6, text: '+' + points + (mult > 1 ? ' x' + mult : ''), age: 0, color: mult > 1 ? '#ffd23f' : '#6dffb2', side: 'both' });
     if (g.hint && g.hint.id === d.id) g.hint = null;
     g.events.push('found');
     if (g.found.length === level.diffs.length) finishLevel(g);
     return 'found';
   }
   g.levelScore = Math.max(0, g.levelScore - WRONG_PENALTY);
+  g.streak = 0; // a miss breaks the combo
   g.flashes.push({ x, y, side, age: 0 });
   g.popups.push({ x, y: y - 14, text: '-' + WRONG_PENALTY, age: 0, color: '#ff6b7a', side });
   g.shake = { side, age: 0 };
