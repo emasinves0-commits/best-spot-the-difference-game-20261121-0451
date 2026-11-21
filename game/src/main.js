@@ -12,18 +12,19 @@ import {
 import { readShotRequest, applyShot } from './shots.js';
 
 const STORE_KEY = 'neonpalms.besttimes.v1';
+const SCORE_KEY = 'neonpalms.bestscores.v1';
 
-function loadBest() {
+function loadBest(key) {
   try {
-    return JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {};
+    return JSON.parse(localStorage.getItem(key) || '{}') || {};
   } catch {
     return {};
   }
 }
 
-function saveBest(best) {
+function saveBest(key, best) {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(best));
+    localStorage.setItem(key, JSON.stringify(best));
   } catch {
     // private mode or blocked storage: best times just last for this visit
   }
@@ -37,7 +38,7 @@ canvas.height = CANVAS_H;
 const params = new URLSearchParams(location.search);
 const shot = readShotRequest(location.search);
 const bitmaps = LEVELS.map(renderLevelBitmaps);
-const game = createGame(shot ? {} : loadBest());
+const game = createGame(shot ? {} : loadBest(STORE_KEY), shot ? {} : loadBest(SCORE_KEY));
 const ui = { mouse: null, debug: params.get('debug') === '1', frozen: false };
 let buttons = [];
 
@@ -51,7 +52,10 @@ const SOUNDS = {
 
 function flushEvents() {
   for (const name of game.events) {
-    if (name === 'win' && !shot) saveBest(game.bestTimes);
+    if (name === 'win' && !shot) {
+      saveBest(STORE_KEY, game.bestTimes);
+      saveBest(SCORE_KEY, game.bestScores);
+    }
     const play = SOUNDS[name];
     if (play) play();
   }
