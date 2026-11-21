@@ -2,7 +2,7 @@
 // Each state is built by driving the real game logic (clicks, hints, ticks)
 // with fixed times, so nothing here depends on the wall clock or randomness.
 import { LEVELS } from './levels.js';
-import { clickPicture, startLevel, tick, useHint } from './game.js';
+import { clickPicture, goToMenu, startLevel, tick, useHint } from './game.js';
 
 export function readShotRequest(search) {
   const q = new URLSearchParams(search);
@@ -28,49 +28,68 @@ function settle(g) {
   g.events.length = 0;
 }
 
+// Play levels 1..count for real (every difference found, spread evenly over
+// clearTime seconds), with an optional wrong click on the way. Leaves the game
+// on the result of the last level played, with honest scores and best times.
+function playThrough(g, count, plan) {
+  for (let i = 0; i < count; i++) {
+    startLevel(g, i);
+    const n = LEVELS[i].diffs.length;
+    const { clearTime, missAt } = plan[i];
+    for (let k = 0; k < n; k++) {
+      g.elapsed = 5 + ((clearTime - 5) * k) / (n - 1);
+      if (k === missAt) clickPicture(g, 4, 4, 'left');
+      clickPicture(g, LEVELS[i].diffs[k].x, LEVELS[i].diffs[k].y, k % 2 ? 'right' : 'left');
+    }
+  }
+}
+
+const RUN = [
+  { clearTime: 52, missAt: -1 },
+  { clearTime: 96, missAt: 5 },
+  { clearTime: 88, missAt: 7 },
+  { clearTime: 74, missAt: 8 },
+];
+
 const SHOTS = {
-  // Level 1, three found, four to go.
+  // Level select after a full run: four levels, best score and time on each card.
   cover(g) {
-    startLevel(g, 0);
-    findAt(g, [0, 2, 3], [14, 29, 47]);
-    g.elapsed = 52;
-    tick(g, 1.2);
+    playThrough(g, LEVELS.length, RUN);
+    goToMenu(g);
     settle(g);
   },
-  // Level 2, two found after a fast first level.
-  level2(g) {
-    startLevel(g, 1);
-    g.results = [{ score: 596, time: 52, stars: 3 }];
-    g.carried = 596;
-    findAt(g, [0, 5], [22, 41]);
+  // Level 4 in play after three cleared levels: six found, a x3 combo running.
+  level4(g) {
+    playThrough(g, 3, RUN);
+    startLevel(g, 3);
+    findAt(g, [0, 2, 4, 5, 6, 10], [9, 15, 22, 27, 33, 41]);
     g.elapsed = 46;
     tick(g, 1.2);
     settle(g);
   },
-  // Level 3 with two found, handy for checking the hardest scene.
+  // Level 3, handy for checking the marina scene.
   level3(g) {
+    playThrough(g, 2, RUN);
     startLevel(g, 2);
-    g.results = [{ score: 596, time: 52, stars: 3 }, { score: 880, time: 90, stars: 2 }];
-    g.carried = 1476;
     findAt(g, [3, 9], [19, 38]);
     g.elapsed = 44;
     tick(g, 1.2);
     settle(g);
   },
-  // Level 1 with a golden hint ring pulsing on the first unfound difference.
+  // Level 2 with the golden hint pulsing on the first unfound difference.
   hint(g) {
-    startLevel(g, 0);
-    findAt(g, [1, 3], [21, 44]);
-    g.elapsed = 71;
+    playThrough(g, 1, RUN);
+    startLevel(g, 1);
+    findAt(g, [1, 2, 3], [20, 33, 45]);
+    g.elapsed = 61;
     useHint(g);
     tick(g, 0.45);
     g.popups = [];
     g.events.length = 0;
   },
-  // Level 1 fully cleared, result card up.
+  // All four levels cleared: the victory screen.
   win(g) {
-    startLevel(g, 0);
-    findAt(g, [0, 1, 2, 3, 4, 5, 6], [6, 13, 21, 29, 38, 46, 54]);
+    playThrough(g, LEVELS.length, RUN);
     tick(g, 2);
     settle(g);
   },
