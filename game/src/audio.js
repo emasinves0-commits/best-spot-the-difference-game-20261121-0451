@@ -3,7 +3,9 @@
 
 let ctx = null;
 let master = null;
+const MUTE_KEY = 'neonpalms.muted';
 let muted = false;
+try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) { /* storage unavailable: stay unmuted */ }
 
 export function unlockAudio() {
   if (ctx) {
@@ -24,6 +26,7 @@ export function isMuted() {
 
 export function toggleMute() {
   muted = !muted;
+  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) { /* ignore */ }
   if (master) master.gain.value = muted ? 0 : 0.5;
   return muted;
 }
